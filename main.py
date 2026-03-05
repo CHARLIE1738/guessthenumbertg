@@ -430,8 +430,6 @@ def initialize_bot():
         return bot
     return bot
 
-# Don't initialize bot at module import time to avoid Application class issues
-# Bot will be initialized on first webhook call
 
 if __name__ == '__main__':
     # Get bot token from environment variable
