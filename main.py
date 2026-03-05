@@ -410,6 +410,25 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "number-guessing-bot"}
 
+# Initialize bot for webhook access (runs when module is imported)
+def initialize_bot():
+    global bot
+    if bot is None:
+        # Get bot token from environment variable
+        bot_token = os.getenv('BOT_TOKEN')
+        if not bot_token:
+            logger.error("❌ Error: BOT_TOKEN environment variable not set!")
+            return None
+        
+        # Initialize bot globally
+        bot = NumberGuessingBot(bot_token)
+        logger.info("Bot initialized for webhook access")
+        return bot
+    return bot
+
+# Initialize bot when module is imported (for Render deployment)
+initialize_bot()
+
 if __name__ == '__main__':
     # Get bot token from environment variable
     bot_token = os.getenv('BOT_TOKEN')
