@@ -387,6 +387,9 @@ class NumberGuessingBot:
         logger.info("Starting Number Guessing Bot...")
         self.app.run_polling()
 
+# Global bot instance for webhook access
+bot = None
+
 # Webhook setup for Render deployment
 app = FastAPI()
 
@@ -415,7 +418,7 @@ if __name__ == '__main__':
         print("Please set your bot token as an environment variable.")
         exit(1)
     
-    # Start the bot
+    # Initialize bot globally
     bot = NumberGuessingBot(bot_token)
     
     # Check if running on Render (PORT environment variable)
