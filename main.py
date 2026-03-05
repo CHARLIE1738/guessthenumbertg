@@ -397,6 +397,10 @@ app = FastAPI()
 async def webhook(request: Request):
     """Webhook endpoint for Telegram"""
     try:
+        # Initialize bot if not already done
+        if bot is None or bot.app is None:
+            initialize_bot()
+        
         json_data = await request.json()
         update = Update.de_json(json_data, bot.app.bot)
         await bot.app.process_update(update)
