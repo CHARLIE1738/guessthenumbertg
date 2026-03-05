@@ -3,7 +3,7 @@ import logging
 import random
 import json
 from datetime import datetime
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Bot
+import requests
 from database import DatabaseManager
 import uvicorn
 from fastapi import FastAPI, Request
@@ -32,29 +32,100 @@ class NumberGuessingBot:
     def __init__(self, token):
         self.token = token
         self.db = DatabaseManager()
-        self.bot = Bot(token=token)
+        self.base_url = f"https://api.telegram.org/bot{token}"
         self.conversations = {}  # Store conversation state
     
-    async def start_game(self, update: Update, context=None):
+    def send_message(self, chat_id, text, reply_markup=None, parse_mode=None):
+        """Send a message using Telegram Bot API"""
+        url = f"{self.base_url}/sendMessage"
+        data = {
+            'chat_id': chat_id,
+            'text': text
+        }
+        if reply_markup:
+            data['reply_markup'] = json.dumps(reply_markup)
+        if parse_mode:
+            data['parse_mode'] = parse_mode
+        
+        try:
+            response = requests.post(url, data=data)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
+            return None
+    
+    def edit_message_text(self, chat_id, message_id, text, reply_markup=None, parse_mode=None):
+        """Edit a message using Telegram Bot API"""
+        url = f"{self.base_url}/editMessageText"
+        data = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'text': text
+        }
+        if reply_markup:
+            data['reply_markup'] = json.dumps(reply_markup)
+        if parse_mode:
+            data['parse_mode'] = parse_mode
+        
+        try:
+            response = requests.post(url, data=data)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error editing message: {e}")
+            return None
+    
+    def answer_callback_query(self, callback_query_id, text=None):
+        """Answer a callback query"""
+        url = f"{self.base_url}/answerCallbackQuery"
+        data = {
+            'callback_query_id': callback_query_id
+        }
+        if text:
+            data['text'] = text
+        
+        try:
+            response = requests.post(url, data=data)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error answering callback query: {e}")
+            return None
+    
+    def get_chat_administrators(self, chat_id):
+        """Get chat administrators"""
+        url = f"{self.base_url}/getChatAdministrators"
+        data = {'chat_id': chat_id}
+        
+        try:
+            response = requests.post(url, data=data)
+            response.raise_for_status()
+            return response.json().get('result', [])
+        except Exception as e:
+            logger.error(f"Error getting chat administrators: {e}")
+            return []
+    
+    async def start_game(self, update):
         """Start a new game - admin only"""
-        chat_id = update.effective_chat.id
-        user_id = update.effective_user.id
-        user_name = update.effective_user.full_name
+        chat_id = update['message']['chat']['id']
+        user_id = update['message']['from']['id']
+        user_name = update['message']['from']['first_name']
         
         # Check if user is admin
-        if not await self.is_admin(update, user_id):
-            await self.bot.send_message(chat_id=chat_id, text="❌ Only admins can start games!")
+        if not await self.is_admin(chat_id, user_id):
+            self.send_message(chat_id, "❌ Only admins can start games!")
             return
         
         # Check if there's already an active game
         active_game = self.db.get_active_game(str(chat_id))
         if active_game:
-            await self.bot.send_message(chat_id=chat_id, text=f"❌ There's already an active game started by {active_game['admin_name']}!")
+            self.send_message(chat_id, f"❌ There's already an active game started by {active_game['admin_name']}!")
             return
         
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text="🎉 Starting a new game!\n\n📝 What is the purpose of this event? (e.g., 'Giveaway: 1 Discord Nitro')"
+        self.send_message(
+            chat_id,
+            "🎉 Starting a new game!\n\n📝 What is the purpose of this event? (e.g., 'Giveaway: 1 Discord Nitro')"
         )
         
         # Set conversation state
@@ -65,14 +136,14 @@ class NumberGuessingBot:
             'chat_id': chat_id
         }
     
-    async def handle_message(self, update: Update, context=None):
+    async def handle_message(self, update):
         """Handle messages during conversation"""
-        chat_id = str(update.effective_chat.id)
+        chat_id = str(update['message']['chat']['id'])
         
         if chat_id in self.conversations and self.conversations[chat_id].get('state') == AWAITING_PURPOSE:
-            purpose = update.message.text.strip()
+            purpose = update['message']['text'].strip()
             if len(purpose) > 100:
-                await self.bot.send_message(chat_id=chat_id, text="📝 Purpose too long! Please keep it under 100 characters.")
+                self.send_message(chat_id, "📝 Purpose too long! Please keep it under 100 characters.")
                 return
             
             self.conversations[chat_id]['purpose'] = purpose
@@ -80,34 +151,38 @@ class NumberGuessingBot:
             
             # Show range selection buttons
             keyboard = [
-                [InlineKeyboardButton("1-1,000", callback_data='1000'),
-                 InlineKeyboardButton("1-5,000", callback_data='5000')],
-                [InlineKeyboardButton("1-10,000", callback_data='10000'),
-                 InlineKeyboardButton("1-20,000", callback_data='20000')],
-                [InlineKeyboardButton("1-50,000", callback_data='50000')]
+                [{"text": "1-1,000", "callback_data": "1000"},
+                 {"text": "1-5,000", "callback_data": "5000"}],
+                [{"text": "1-10,000", "callback_data": "10000"},
+                 {"text": "1-20,000", "callback_data": "20000"}],
+                [{"text": "1-50,000", "callback_data": "50000"}]
             ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = {"inline_keyboard": keyboard}
             
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text=f"🎯 Purpose set: *{purpose}*\n\n🔢 Choose the number range:",
+            self.send_message(
+                chat_id,
+                f"🎯 Purpose set: *{purpose}*\n\n🔢 Choose the number range:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
     
-    async def handle_range_selection(self, update: Update, context=None):
+    async def handle_range_selection(self, update):
         """Handle range selection via callback"""
-        query = update.callback_query
-        await query.answer()
+        query = update['callback_query']
+        callback_query_id = query['id']
+        range_key = query['data']
+        message = query['message']
+        chat_id = str(message['chat']['id'])
         
-        range_key = query.data
+        # Answer the callback query
+        self.answer_callback_query(callback_query_id)
+        
         if range_key not in RANGE_OPTIONS:
-            await query.edit_message_text("❌ Invalid range selected!")
+            self.edit_message_text(chat_id, message['message_id'], "❌ Invalid range selected!")
             return
         
-        chat_id = str(query.message.chat_id)
         if chat_id not in self.conversations:
-            await query.edit_message_text("❌ Conversation state lost. Please start again.")
+            self.edit_message_text(chat_id, message['message_id'], "❌ Conversation state lost. Please start again.")
             return
         
         range_min, range_max = RANGE_OPTIONS[range_key]
@@ -124,7 +199,7 @@ class NumberGuessingBot:
         )
         
         if not success:
-            await query.edit_message_text(f"❌ Error starting game: {result}")
+            self.edit_message_text(chat_id, message['message_id'], f"❌ Error starting game: {result}")
             return
         
         game_id = result
@@ -140,16 +215,19 @@ class NumberGuessingBot:
             f"Good luck! @everyone"
         )
         
-        await query.edit_message_text(announcement, parse_mode='Markdown')
+        self.edit_message_text(chat_id, message['message_id'], announcement, parse_mode='Markdown')
         
         # Clear conversation state
         del self.conversations[chat_id]
         
         logger.info(f"Game started in chat {chat_id} by {admin_name} for '{purpose}' with range {range_min}-{range_max}")
     
-    async def handle_guess(self, update: Update, context=None):
+    async def handle_guess(self, update):
         """Handle number guesses"""
-        message = update.message.text.strip()
+        message = update['message']['text'].strip()
+        chat_id = update['message']['chat']['id']
+        user_id = update['message']['from']['id']
+        user_name = update['message']['from']['first_name']
         
         # Check if it's a guess command (starts with /)
         if not message.startswith('/'):
@@ -159,10 +237,6 @@ class NumberGuessingBot:
             guess_number = int(message[1:])  # Remove the / and convert to int
         except ValueError:
             return  # Not a valid number guess
-        
-        chat_id = update.effective_chat.id
-        user_id = update.effective_user.id
-        user_name = update.effective_user.full_name
         
         # Get active game
         active_game = self.db.get_active_game(str(chat_id))
@@ -175,9 +249,9 @@ class NumberGuessingBot:
         
         # Validate guess range
         if guess_number < range_min or guess_number > range_max:
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text=f"❌ Number must be between {range_min:,} and {range_max:,}!"
+            self.send_message(
+                chat_id,
+                f"❌ Number must be between {range_min:,} and {range_max:,}!"
             )
             return
         
@@ -196,9 +270,9 @@ class NumberGuessingBot:
         self.db.record_guess(active_game['id'], str(user_id), user_name, guess_number, feedback)
         
         # Send feedback
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text=f"{feedback}\nYour guess: *{guess_number:,}*\nRange: {range_min:,} - {range_max:,}",
+        self.send_message(
+            chat_id,
+            f"{feedback}\nYour guess: *{guess_number:,}*\nRange: {range_min:,} - {range_max:,}",
             parse_mode='Markdown'
         )
         
@@ -221,37 +295,37 @@ class NumberGuessingBot:
                 f"🎊 @everyone {user_name} is the winner! 🎊"
             )
             
-            await self.bot.send_message(chat_id=chat_id, text=winner_message, parse_mode='Markdown')
+            self.send_message(chat_id, winner_message, parse_mode='Markdown')
             
             logger.info(f"User {user_name} won game {active_game['id']} with number {target_number}")
     
-    async def stop_game(self, update: Update, context=None):
+    async def stop_game(self, update):
         """Stop the current game - admin only"""
-        chat_id = update.effective_chat.id
-        user_id = update.effective_user.id
+        chat_id = update['message']['chat']['id']
+        user_id = update['message']['from']['id']
         
-        if not await self.is_admin(update, user_id):
-            await self.bot.send_message(chat_id=chat_id, text="❌ Only admins can stop games!")
+        if not await self.is_admin(chat_id, user_id):
+            self.send_message(chat_id, "❌ Only admins can stop games!")
             return
         
         active_game = self.db.get_active_game(str(chat_id))
         if not active_game:
-            await self.bot.send_message(chat_id=chat_id, text="❌ No active game to stop!")
+            self.send_message(chat_id, "❌ No active game to stop!")
             return
         
         # End the game
         self.db.end_game(active_game['id'], None, None)
         
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text=f"🛑 Game stopped by admin!\n🎯 The number was: {active_game['target_number']:,}\n🏆 Purpose: {active_game['purpose']}"
+        self.send_message(
+            chat_id,
+            f"🛑 Game stopped by admin!\n🎯 The number was: {active_game['target_number']:,}\n🏆 Purpose: {active_game['purpose']}"
         )
     
-    async def show_stats(self, update: Update, context=None):
+    async def show_stats(self, update):
         """Show game statistics"""
-        chat_id = update.effective_chat.id
-        user_id = update.effective_user.id
-        user_name = update.effective_user.full_name
+        chat_id = update['message']['chat']['id']
+        user_id = update['message']['from']['id']
+        user_name = update['message']['from']['first_name']
         
         # Get chat stats
         chat_stats = self.db.get_game_stats(str(chat_id))
@@ -280,14 +354,14 @@ class NumberGuessingBot:
             f"💡 Use /leaderboard to see top players!"
         )
         
-        await self.bot.send_message(chat_id=chat_id, text=stats_message, parse_mode='Markdown')
+        self.send_message(chat_id, stats_message, parse_mode='Markdown')
     
-    async def show_leaderboard(self, update: Update, context=None):
+    async def show_leaderboard(self, update):
         """Show the leaderboard"""
         leaderboard = self.db.get_leaderboard()
         
         if not leaderboard:
-            await self.bot.send_message(chat_id=update.effective_chat.id, text="📊 No games played yet! Start a game to see the leaderboard.")
+            self.send_message(update['message']['chat']['id'], "📊 No games played yet! Start a game to see the leaderboard.")
             return
         
         message = "🏆 *LEADERBOARD* 🏆\n\n"
@@ -297,30 +371,30 @@ class NumberGuessingBot:
                 f"   🏅 Wins: {wins} | 🔥 Streak: {current_streak} | 📈 Best: {longest_streak}\n\n"
             )
         
-        await self.bot.send_message(chat_id=update.effective_chat.id, text=message, parse_mode='Markdown')
+        self.send_message(update['message']['chat']['id'], message, parse_mode='Markdown')
     
-    async def show_history(self, update: Update, context=None):
+    async def show_history(self, update):
         """Show recent guess history"""
-        chat_id = update.effective_chat.id
+        chat_id = update['message']['chat']['id']
         active_game = self.db.get_active_game(str(chat_id))
         
         if not active_game:
-            await self.bot.send_message(chat_id=chat_id, text="❌ No active game to show history for!")
+            self.send_message(chat_id, "❌ No active game to show history for!")
             return
         
         history = self.db.get_guess_history(active_game['id'], 5)
         
         if not history:
-            await self.bot.send_message(chat_id=chat_id, text="📝 No guesses recorded yet!")
+            self.send_message(chat_id, "📝 No guesses recorded yet!")
             return
         
         message = "📜 *Recent Guesses* 📜\n\n"
         for name, guess, feedback, timestamp in history:
             message += f"• *{name}*: {guess:,} - {feedback}\n"
         
-        await self.bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+        self.send_message(chat_id, message, parse_mode='Markdown')
     
-    async def show_help(self, update: Update, context=None):
+    async def show_help(self, update):
         """Show help information"""
         help_text = (
             "🆘 *Number Guessing Bot Help*\n\n"
@@ -341,13 +415,13 @@ class NumberGuessingBot:
             "• Track your progress on the leaderboard!"
         )
         
-        await self.bot.send_message(chat_id=update.effective_chat.id, text=help_text, parse_mode='Markdown')
+        self.send_message(update['message']['chat']['id'], help_text, parse_mode='Markdown')
     
-    async def is_admin(self, update: Update, user_id: str) -> bool:
+    async def is_admin(self, chat_id, user_id):
         """Check if user is admin"""
         try:
-            chat_administrators = await self.bot.get_chat_administrators(update.effective_chat.id)
-            admin_ids = [admin.user.id for admin in chat_administrators]
+            admins = self.get_chat_administrators(chat_id)
+            admin_ids = [admin['user']['id'] for admin in admins]
             return int(user_id) in admin_ids
         except:
             return False
@@ -367,31 +441,31 @@ async def webhook(request: Request):
             initialize_bot()
         
         json_data = await request.json()
-        update = Update.de_json(json_data, bot.bot)
         
-        # Route the update to appropriate handler
-        if update.message:
-            message = update.message.text.strip()
+        # Handle different types of updates
+        if 'message' in json_data:
+            message = json_data['message']
+            text = message.get('text', '')
             
-            if message.startswith('/start'):
-                await bot.start_game(update)
-            elif message.startswith('/stop'):
-                await bot.stop_game(update)
-            elif message.startswith('/stats'):
-                await bot.show_stats(update)
-            elif message.startswith('/leaderboard'):
-                await bot.show_leaderboard(update)
-            elif message.startswith('/history'):
-                await bot.show_history(update)
-            elif message.startswith('/help'):
-                await bot.show_help(update)
-            elif message.startswith('/'):
-                await bot.handle_guess(update)
+            if text.startswith('/start'):
+                await bot.start_game(json_data)
+            elif text.startswith('/stop'):
+                await bot.stop_game(json_data)
+            elif text.startswith('/stats'):
+                await bot.show_stats(json_data)
+            elif text.startswith('/leaderboard'):
+                await bot.show_leaderboard(json_data)
+            elif text.startswith('/history'):
+                await bot.show_history(json_data)
+            elif text.startswith('/help'):
+                await bot.show_help(json_data)
+            elif text.startswith('/'):
+                await bot.handle_guess(json_data)
             else:
-                await bot.handle_message(update)
+                await bot.handle_message(json_data)
         
-        elif update.callback_query:
-            await bot.handle_range_selection(update)
+        elif 'callback_query' in json_data:
+            await bot.handle_range_selection(json_data)
         
         return JSONResponse(content={"status": "ok"})
     except Exception as e:
