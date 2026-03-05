@@ -398,7 +398,7 @@ async def webhook(request: Request):
     """Webhook endpoint for Telegram"""
     try:
         # Initialize bot if not already done
-        if bot is None or bot.app is None:
+        if bot is None:
             initialize_bot()
         
         json_data = await request.json()
@@ -430,8 +430,8 @@ def initialize_bot():
         return bot
     return bot
 
-# Initialize bot when module is imported (for Render deployment)
-initialize_bot()
+# Don't initialize bot at module import time to avoid Application class issues
+# Bot will be initialized on first webhook call
 
 if __name__ == '__main__':
     # Get bot token from environment variable
