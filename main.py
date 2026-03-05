@@ -1,6 +1,7 @@
 import os
 import logging
 import random
+import json
 from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -40,11 +41,13 @@ class NumberGuessingBot:
     def __init__(self, token):
         self.token = token
         self.db = DatabaseManager()
-        self.app = Application.builder().token(token).build()
+        self.app = None
         self.setup_handlers()
     
     def setup_handlers(self):
         """Set up all command and message handlers"""
+        # Create application instance
+        self.app = Application.builder().token(self.token).build()
         
         # Start command handler
         self.app.add_handler(CommandHandler("start", self.start_game))
@@ -414,7 +417,7 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "number-guessing-bot"}
 
-# Initialize bot for webhook access (runs when module is imported)
+# Initialize bot for webhook access
 def initialize_bot():
     global bot
     if bot is None:
@@ -429,7 +432,6 @@ def initialize_bot():
         logger.info("Bot initialized for webhook access")
         return bot
     return bot
-
 
 if __name__ == '__main__':
     # Get bot token from environment variable
