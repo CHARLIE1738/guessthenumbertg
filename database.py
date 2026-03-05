@@ -59,6 +59,15 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # Create cooldowns table for anti-spam
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS cooldowns (
+                        user_id TEXT PRIMARY KEY,
+                        last_guess_time TIMESTAMP,
+                        chat_id TEXT
+                    )
+                ''')
+                
                 conn.commit()
                 logging.info("Database initialized successfully")
                 
@@ -284,3 +293,50 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error getting game stats: {e}")
             return {'total_games': 0, 'completed_games': 0, 'avg_guesses_per_game': 0}
+    
+    def check_cooldown(self, user_id, chat_id, cooldown_seconds=2):
+        """Check if user is on cooldown"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT last_guess_time FROM cooldowns WHERE user_id = ?
+                ''', (user_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    last_guess = datetime.fromisoformat(result[0])
+                    time_diff = datetime.now() - last_guess
+                    if time_diff.total_seconds() < cooldown_seconds:
+                        return False, cooldown_seconds - int(time_diff.total_seconds())
+                
+                # Update or insert cooldown
+                cursor.execute('''
+                    INSERT OR REPLACE INTO cooldowns (user_id, last_guess_time, chat_id)
+                    VALUES (?, ?, ?)
+                ''', (user_id, datetime.now().isoformat(), chat_id))
+                
+                conn.commit()
+                return True, 0
+                
+        except Exception as e:
+            logging.error(f"Error checking cooldown: {e}")
+            return True, 0
+    
+    def clear_expired_cooldowns(self):
+        """Clear expired cooldowns (older than 1 hour)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Clear cooldowns older than 1 hour
+                one_hour_ago = datetime.now() - timedelta(hours=1)
+                cursor.execute('''
+                    DELETE FROM cooldowns WHERE last_guess_time < ?
+                ''', (one_hour_ago.isoformat(),))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logging.error(f"Error clearing expired cooldowns: {e}")

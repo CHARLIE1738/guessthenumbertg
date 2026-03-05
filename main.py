@@ -2,7 +2,7 @@ import os
 import logging
 import random
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from database import DatabaseManager
 import uvicorn
@@ -237,6 +237,15 @@ class NumberGuessingBot:
             guess_number = int(message[1:])  # Remove the / and convert to int
         except ValueError:
             return  # Not a valid number guess
+        
+        # Check anti-spam cooldown (2 seconds)
+        can_guess, remaining_time = self.db.check_cooldown(str(user_id), str(chat_id), cooldown_seconds=2)
+        if not can_guess:
+            self.send_message(
+                chat_id,
+                f"⏳ *Cooldown Active!* Please wait {remaining_time} seconds before guessing again."
+            )
+            return
         
         # Get active game
         active_game = self.db.get_active_game(str(chat_id))
