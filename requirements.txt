@@ -1,0 +1,11 @@
+python-telegram-bot==20.7
+python-dotenv==1.0.0
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlite3
+asyncio
+logging
+datetime
+random
+os
+sys

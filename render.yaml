@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: number-guessing-bot
+    runtime: python
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: BOT_TOKEN
+        fromDatabase: true
+        required: true
+      - key: PORT
+        value: 8000
+      - key: RENDER
+        value: true
+      - key: WEBHOOK_URL
+        fromDatabase: true
+        required: false
+    healthCheckPath: /health
+    region: oregon
+    plan: free
+    autoDeploy: true
+    pullRequestPreviewsEnabled: true
